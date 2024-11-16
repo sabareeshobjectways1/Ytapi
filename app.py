@@ -3,16 +3,23 @@ import json
 import time
 from datetime import datetime
 
+YOUTUBE_API_KEY = "AIzaSyDwHs4dou-4hLfcEfCbekg3VUoOO18VGks"
+BLOG_ID = "1050468214587466272"
+ACCESS_TOKEN = "ya29.a0AeDClZCy1WLDEENeBtm6_QMC7NASa94ikF__KE6dp84z0fh1hT3NZi1NOMasMBP1ALZIlOqbR4XasKdLg4B9NKvafZWlU16V-OD3IcI6-kgr2rECqfXutPLJBYsQXcUVnte67OYU1Vzp1WMunNYIeIzPGpfNOJ6ieyEsPR25aCgYKARUSARISFQHGX2MiZ-LVW8ReZFPorcX-cZl-qQ0175"
+CHANNEL_ID = "UC-JFyL0zDFOsPMpuWu39rPA"
+
 def fetch_latest_youtube_video():
     api_url = "https://youtube.googleapis.com/youtube/v3/search"
+    current_date = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+    
     params = {
         "part": "snippet",
-        "channelId": "UC-JFyL0zDFOsPMpuWu39rPA",
+        "channelId": CHANNEL_ID,
         "type": "video",
         "maxResults": 1,
         "order": "date",
         "publishedAfter": "2024-11-16T00:00:00Z",
-        "key": "AIzaSyDwHs4dou-4hLfcEfCbekg3VUoOO18VGks"
+        "key": YOUTUBE_API_KEY
     }
     
     try:
@@ -29,19 +36,20 @@ def fetch_latest_youtube_video():
                 'publishedAt': video['snippet']['publishedAt'],
                 'thumbnailUrl': video['snippet']['thumbnails']['high']['url']
             }
+        print("No videos found in response:", data)
         return None
     except Exception as e:
         print(f"Error fetching YouTube data: {e}")
+        if 'response' in locals():
+            print("Response content:", response.text)
         return None
 
-def post_to_blogger(video_data, blogger_access_token, blog_id):
+def post_to_blogger(video_data):
     if not video_data:
         return
     
-    # Blogger API endpoint
-    url = f"https://www.googleapis.com/blogger/v3/blogs/{blog_id}/posts"
+    url = f"https://www.googleapis.com/blogger/v3/blogs/{BLOG_ID}/posts"
     
-    # Create HTML content
     content = f"""
     <h2>{video_data['title']}</h2>
     <div class="video-container">
@@ -49,6 +57,7 @@ def post_to_blogger(video_data, blogger_access_token, blog_id):
                 height="315" 
                 src="https://www.youtube.com/embed/{video_data['videoId']}" 
                 frameborder="0" 
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
                 allowfullscreen>
         </iframe>
     </div>
@@ -59,7 +68,6 @@ def post_to_blogger(video_data, blogger_access_token, blog_id):
     </p>
     """
     
-    # Prepare the post data
     post_data = {
         'kind': 'blogger#post',
         'title': video_data['title'],
@@ -67,9 +75,8 @@ def post_to_blogger(video_data, blogger_access_token, blog_id):
         'labels': ['YouTube', 'Auto-Posted']
     }
     
-    # Set up headers with OAuth token
     headers = {
-        'Authorization': f'Bearer {blogger_access_token}',
+        'Authorization': f'Bearer {ACCESS_TOKEN}',
         'Content-Type': 'application/json'
     }
     
@@ -80,33 +87,54 @@ def post_to_blogger(video_data, blogger_access_token, blog_id):
         return response.json()
     except Exception as e:
         print(f"Error posting to Blogger: {e}")
+        print("Response content:", response.text if 'response' in locals() else "No response")
         return None
 
+def check_token_validity():
+    test_url = f"https://www.googleapis.com/blogger/v3/blogs/{BLOG_ID}"
+    headers = {'Authorization': f'Bearer {ACCESS_TOKEN}'}
+    
+    try:
+        response = requests.get(test_url, headers=headers)
+        return response.status_code == 200
+    except:
+        return False
+
 def main():
-    # Your Blogger details
-    BLOG_ID = 'YOUR_BLOG_ID'  # Get from your Blogger dashboard URL
-    ACCESS_TOKEN = 'YOUR_ACCESS_TOKEN'  # Get from Google OAuth 2.0 Playground
+    print("Starting YouTube to Blogger auto-poster...")
+    
+    # First check if token is valid
+    if not check_token_validity():
+        print("ERROR: Access token is invalid or expired. Please get a new access token.")
+        return
     
     last_video_id = None
-    
-    print("Starting YouTube to Blogger auto-poster...")
+    error_count = 0
     
     while True:
         try:
+            print("\nChecking for new videos...")
             video_data = fetch_latest_youtube_video()
             
             if video_data and video_data['videoId'] != last_video_id:
                 print(f"New video found: {video_data['title']}")
-                post_to_blogger(video_data, ACCESS_TOKEN, BLOG_ID)
-                last_video_id = video_data['videoId']
+                if post_to_blogger(video_data):
+                    last_video_id = video_data['videoId']
+                    error_count = 0
             else:
                 print("No new videos found")
             
+            # If too many errors occur, stop the script
+            if error_count >= 5:
+                print("Too many errors occurred. Stopping script.")
+                break
+                
             print("Waiting for 3 minutes before next check...")
             time.sleep(180)  # Wait for 3 minutes
             
         except Exception as e:
             print(f"Error in main loop: {e}")
+            error_count += 1
             time.sleep(180)  # Still wait before retrying
 
 if __name__ == "__main__":
